@@ -1,6 +1,6 @@
-(ns buster.build
-  (:require [buster.utils :as utils]
-            [buster.job :as j]))
+(ns noci.build
+  (:require [noci.utils :as utils]
+            [noci.job :as j]))
 
 (defn- lein
   [job]
@@ -20,7 +20,7 @@
          git-url :git-url
          branch :branch
          commit :commit} @job
-        builder-func (or (and builder (ns-resolve 'buster.build (symbol builder)))
+        builder-func (or (and builder (ns-resolve 'noci.build (symbol builder)))
                          (utils/fail :fatal (str "invalid 'build' param for build: " builder)))]
     (-> job
         (j/log (str "Building " git-url " branch " branch) :user user)

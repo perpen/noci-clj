@@ -1,5 +1,5 @@
-(ns buster.trigger
-  (:require [buster.utils :as utils]
+(ns noci.trigger
+  (:require [noci.utils :as utils]
             [clojure.string :as string]
             [clojure.java.io :as io]))
 

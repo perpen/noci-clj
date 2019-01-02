@@ -1,8 +1,8 @@
-(ns buster.job-test
+(ns noci.job-test
   (:require [midje.sweet :refer :all]
             [ring.mock.request :as mock]
-            [buster.utils :as utils]
-            [buster.job :refer :all]))
+            [noci.utils :as utils]
+            [noci.job :refer :all]))
 
 (facts "about jobs"
        #_(fact "log"

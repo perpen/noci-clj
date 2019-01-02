@@ -1,8 +1,8 @@
-(ns buster.deployment
-  (:require [buster.tags :as tags]
-            [buster.utils :as utils]
-            [buster.job :as j]
-            [buster.fck :as fck]))
+(ns noci.deployment
+  (:require [noci.tags :as tags]
+            [noci.utils :as utils]
+            [noci.job :as j]
+            [noci.fck :as fck]))
 
 (def ansible-deployer-commit "FIXME-ansible-deployer-commit")
 

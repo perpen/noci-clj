@@ -1,9 +1,9 @@
-(ns buster.secrets
+(ns noci.secrets
   ^{:doc "For now just for storing bundle vault passwords."}
   (:require [me.raynes.conch :as sh]
             [clojure.string :as string]
             [me.raynes.fs :as fs]
-            [buster.utils :as utils]))
+            [noci.utils :as utils]))
 
 (def resource-path "vault-passwords.yml")
 
@@ -18,7 +18,7 @@
     (utils/fail :fatal "sealed")))
 
 (defn- decrypt-file [secret]
-  (let [path "/tmp/buster-dec"]
+  (let [path "/tmp/noci-dec"]
     (spit path secret)
     (try
       (sh/with-programs [ansible-vault]

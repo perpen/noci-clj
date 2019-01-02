@@ -1,7 +1,7 @@
-(ns buster.tags
-  (:require [buster.utils :as utils]
-            [buster.fck :as fck]
-            [buster.nexus :as nexus]
+(ns noci.tags
+  (:require [noci.utils :as utils]
+            [noci.fck :as fck]
+            [noci.nexus :as nexus]
             [clojure.string :as string]
             [clojure.data.json :as json]
             [clojure.set :as s]))
@@ -13,8 +13,8 @@
 
 ; Should be retrieved from some safe source
 (def system-keys
-  {:buster-prd "askdjf"
-   :buster-uat "sjdfjef"
+  {:noci-prd "askdjf"
+   :noci-uat "sjdfjef"
    :fck "sldjfkj"})
 
 (defn env-for-authority
@@ -61,16 +61,16 @@
     1))
 
 (def verifiers
-  {:buster-prd nexus-verify
-   :buster-uat nexus-verify
+  {:noci-prd nexus-verify
+   :noci-uat nexus-verify
    :fck fck-verify})
 
 (def nexus-base-url "https://efx-nexus.hk.barbapapa/nexus")
 
 ; In nexus:
-; /Tools/gbm-tooling/buster/1.0/buster-1.0.jar
-; /Tools/gbm-tooling/buster/1.0/buster-1.0.jar.buster-prd.built.sig
-; /Tools/gbm-tooling/buster/1.0/buster-1.0.jar.buster-prd.integration-tested.sig
+; /Tools/gbm-tooling/noci/1.0/noci-1.0.jar
+; /Tools/gbm-tooling/noci/1.0/noci-1.0.jar.noci-prd.built.sig
+; /Tools/gbm-tooling/noci/1.0/noci-1.0.jar.noci-prd.integration-tested.sig
 
 (defn tag [authority spec _])
 

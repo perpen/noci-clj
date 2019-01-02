@@ -1,5 +1,5 @@
-(ns buster.auth
-  (:require [buster.utils :as utils]))
+(ns noci.auth
+  (:require [noci.utils :as utils]))
 
 (def ttl-in-seconds (* 30 60 1000))
 

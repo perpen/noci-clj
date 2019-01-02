@@ -1,8 +1,8 @@
-(ns buster.auth-test
+(ns noci.auth-test
   (:require [midje.sweet :refer :all]
             [ring.mock.request :as mock]
-            [buster.utils :as utils]
-            [buster.auth :refer :all]))
+            [noci.utils :as utils]
+            [noci.auth :refer :all]))
 
 (facts "about auth"
        (clear-tokens)
@@ -10,15 +10,15 @@
        (fact "failed authentication"
              (create-token ..username.. ..password..) => nil
              (provided
-              (#'buster.auth/ldap-authenticated? ..username.. ..password..)
+              (#'noci.auth/ldap-authenticated? ..username.. ..password..)
               => false))
 
        (fact "successful authentication"
              (create-token ..username.. ..password..) => ..token..
              (provided
-              (#'buster.auth/ldap-authenticated? ..username.. ..password..)
+              (#'noci.auth/ldap-authenticated? ..username.. ..password..)
               => true
-              (#'buster.auth/ldap-user-details ..username..) => {:groups ..groups..}
+              (#'noci.auth/ldap-user-details ..username..) => {:groups ..groups..}
               (utils/now) => ..time..
               (utils/generate-random-string) => ..token..))
 

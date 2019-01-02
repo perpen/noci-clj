@@ -1,4 +1,4 @@
-(ns buster.utils
+(ns noci.utils
   (:require [digest]
             [buddy.core.nonce :as nonce]
             [buddy.core.codecs :as codecs]

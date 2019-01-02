@@ -1,10 +1,10 @@
-(ns buster.build-test
+(ns noci.build-test
   (:require [midje.sweet :refer :all]
             [ring.mock.request :as mock]
-            [buster.testing :as testing]
-            [buster.build :as build]
-            [buster.utils :as utils]
-            [buster.job :as j]))
+            [noci.testing :as testing]
+            [noci.build :as build]
+            [noci.utils :as utils]
+            [noci.job :as j]))
 
 (facts "Production build"
        (fact "happy"

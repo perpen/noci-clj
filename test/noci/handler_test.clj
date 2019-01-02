@@ -1,11 +1,11 @@
-(ns buster.handler-test
+(ns noci.handler-test
   (:require [midje.sweet :refer :all]
             [clojure.data.json :as json]
             [ring.mock.request :as mock]
             [ring.util.response :as response]
-            [buster.auth :as auth]
-            [buster.job :as job]
-            [buster.handler :refer :all]))
+            [noci.auth :as auth]
+            [noci.job :as job]
+            [noci.handler :refer :all]))
 
 (facts "about app"
        (let [mock-user {:username "joe"}
@@ -85,27 +85,27 @@
                 (auth/get-user-for-token "..token..") => mock-user))
 
          (fact "negative log-start-index"
-               (#'buster.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
+               (#'noci.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
                                                  :log-start-index -2)
                => {:x 1 :log [3 4]})
 
          (fact "large negative log-start-index"
-               (#'buster.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
+               (#'noci.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
                                                  :log-start-index -10)
                => {:x 1 :log [1 2 3 4]})
 
          (fact "zero log-start-index"
-               (#'buster.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
+               (#'noci.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
                                                  :log-start-index 0)
                => {:x 1 :log [1 2 3 4]})
 
          (fact "positive log-start-index"
-               (#'buster.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
+               (#'noci.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
                                                  :log-start-index 2)
                => {:x 1 :log [3 4]})
 
          (fact "large positive log-start-index"
-               (#'buster.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
+               (#'noci.handler/cleanup-job-map {:x 1 :log [1 2 3 4]}
                                                  :log-start-index 10)
                => {:x 1 :log []})
 
@@ -121,21 +121,21 @@
 
 (facts "about merging params into job template"
        (fact "integer"
-             (#'buster.handler/interpolate {:x 1 :y "%i"} {:y "2"})
+             (#'noci.handler/interpolate {:x 1 :y "%i"} {:y "2"})
              => {:x 1 :y 2})
        (fact "string"
-             (#'buster.handler/interpolate {:x 1 :msg "%s"} {:msg "hi"})
+             (#'noci.handler/interpolate {:x 1 :msg "%s"} {:msg "hi"})
              => {:x 1 :msg "hi"})
        (fact "array"
-             (#'buster.handler/interpolate {:x 1 :things "%a"} {:things "a,b"})
+             (#'noci.handler/interpolate {:x 1 :things "%a"} {:things "a,b"})
              => {:x 1 :things ["a", "b"]})
        (fact "empty array"
-             (#'buster.handler/interpolate {:x 1 :things "%a"} {:things ""})
+             (#'noci.handler/interpolate {:x 1 :things "%a"} {:things ""})
              => {:x 1 :things []})
        (fact "deep values"
-             (#'buster.handler/interpolate {:x {:y "%i", :z {:msg "%s"}}}
+             (#'noci.handler/interpolate {:x {:y "%i", :z {:msg "%s"}}}
                                            {:y "2", :msg "hi"})
              => {:x {:y 2, :z {:msg "hi"}}})
        (fact "invalid format left unchanged"
-             (#'buster.handler/interpolate {:x "%x"} {:x 1})
+             (#'noci.handler/interpolate {:x "%x"} {:x 1})
              => {:x "%x"}))

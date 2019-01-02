@@ -1,11 +1,11 @@
-(ns buster.docker-test
+(ns noci.docker-test
   (:require [midje.sweet :refer :all]
             [ring.mock.request :as mock]
-            [buster.docker :as docker]
-            [buster.testing :as testing]
-            [buster.build :refer :all]
-            [buster.utils :as utils]
-            [buster.job :as j]))
+            [noci.docker :as docker]
+            [noci.testing :as testing]
+            [noci.build :refer :all]
+            [noci.utils :as utils]
+            [noci.job :as j]))
 
 (facts "about docker"
        (fact "happy no args or volumes"

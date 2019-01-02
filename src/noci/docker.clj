@@ -1,6 +1,6 @@
-(ns buster.docker
+(ns noci.docker
   (:require [clojure.string :as string]
-            [buster.job :as j]))
+            [noci.job :as j]))
 
 (defn start [job]
   (let [{user :user

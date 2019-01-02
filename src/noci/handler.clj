@@ -1,4 +1,4 @@
-(ns buster.handler
+(ns noci.handler
   (:require [compojure.core :refer :all]
             [compojure.route :as route]
             [clojure.java.io :as io]
@@ -10,11 +10,11 @@
             [ring.adapter.jetty :refer [run-jetty]]
             [ring.util.response :as response]
             [spyscope.core :refer :all]
-            [buster.job :as j]
-            [buster.trigger :as t]
-            [buster.secrets :as secrets]
-            [buster.utils :as utils]
-            [buster.auth :as auth])
+            [noci.job :as j]
+            [noci.trigger :as t]
+            [noci.secrets :as secrets]
+            [noci.utils :as utils]
+            [noci.auth :as auth])
   (:gen-class))
 
 (defn- make-response
@@ -81,9 +81,9 @@
           (assoc :log (or trimmed-log []))))))
 
 (defn- lookup-job-function
-  "For <type> and phase ('start or <action>) returns function buster.<type>/<action>"
+  "For <type> and phase ('start or <action>) returns function noci.<type>/<action>"
   [job-type phase]
-  (let [ns-name (symbol (str "buster." job-type))
+  (let [ns-name (symbol (str "noci." job-type))
         fun-name (symbol phase)]
     (try
       (ns-resolve ns-name fun-name)

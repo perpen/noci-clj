@@ -1,5 +1,5 @@
-(ns buster.job
-  (:require [buster.utils :as utils]
+(ns noci.job
+  (:require [noci.utils :as utils]
             [clojure.string :as string]
             [me.raynes.conch.low-level :as conch]
             [me.raynes.fs :as fs]
@@ -127,7 +127,7 @@
         (utils/fail :fatal)))
     job))
 
-(def tmp-dir-root "/var/tmp/buster/")
+(def tmp-dir-root "/var/tmp/noci/")
 
 (defn- delete-tmp-dir
   "Before deleting, checks :dir wasn't changed to eg /"
@@ -139,7 +139,7 @@
 
 (defn create [initial-data hint]
   (let [job-key (make-uid hint)
-        dir (str "/var/tmp/buster/" (utils/generate-random-string))
+        dir (str "/var/tmp/noci/" (utils/generate-random-string))
         initial-data (assoc initial-data
                             :created (utils/now)
                             :key job-key

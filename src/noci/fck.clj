@@ -1,5 +1,5 @@
-(ns buster.fck
-  (:require [buster.utils :as utils]))
+(ns noci.fck
+  (:require [noci.utils :as utils]))
 
 (defn get-cr [cr-number & {:keys [env]}])
 

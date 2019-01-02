@@ -1,5 +1,5 @@
-(ns buster.testing
-  (:require [buster.job :as j]))
+(ns noci.testing
+  (:require [noci.job :as j]))
 
 (defn simplify-logs [job]
   (await job) ; b/c we will use :log

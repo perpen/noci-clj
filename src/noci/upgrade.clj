@@ -1,13 +1,13 @@
-(ns buster.upgrade
-  (:require [buster.job :as j]
-            [buster.tags :as tags]
-            [buster.nexus :as nexus]
-            [buster.utils :as utils]))
+(ns noci.upgrade
+  (:require [noci.job :as j]
+            [noci.tags :as tags]
+            [noci.nexus :as nexus]
+            [noci.utils :as utils]))
 
 (defn- make-nexus-spec [version]
   {:repo "Tools"
    :group "com.barbapapa.gbm.tooling"
-   :name "buster"
+   :name "noci"
    :version version
    :packaging "jar"})
 
@@ -22,28 +22,28 @@
   (let [env (utils/current-env)
         requirements {:repo "Tools"
                       :group "com.barbapapa.gbm.tooling"
-                      :artifact "buster"
+                      :artifact "noci"
                       :tags-by-authority
                       (case env
                         :dev {}
-                        :uat {:buster-prd #{"built"}}
-                        :prd {:buster-prd #{"built" "integration-tested"}
+                        :uat {:noci-prd #{"built"}}
+                        :prd {:noci-prd #{"built" "integration-tested"}
                               :tooling-team #{"looks-good-in-uat"}
                               :fck #{"approved"}})}
 
         requirements {:repo "Tools"
                       :group "com.barbapapa.gbm.tooling"
-                      :artifact "buster"
+                      :artifact "noci"
                       :tags-by-authority
                       (case env
                         :dev {}
-                        :uat {:buster-prd #{"built"}}
-                        :prd {:buster-prd #{"built" "integration-tested"}
+                        :uat {:noci-prd #{"built"}}
+                        :prd {:noci-prd #{"built" "integration-tested"}
                               :tooling-team #{"looks-good-in-uat"}
                               :fck #{"approved"}})}
         nexus-spec {:repo "Tools"
                     :group "com.barbapapa.gbm.tooling"
-                    :name "buster"
+                    :name "noci"
                     :version version
                     :packaging "jar"}
         live-path "/tmp/dummy.jar"
@@ -59,7 +59,7 @@
          version :version} job-map]
     (-> job
         (j/assign {:status-message "Upgrading", :rag :amber, :actions #{:stop}})
-        (j/log (str "Upgrading buster to " version) user)
+        (j/log (str "Upgrading noci to " version) user)
         (prepare-exit version))))
 
 (defn stop

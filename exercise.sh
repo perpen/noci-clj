@@ -9,7 +9,7 @@ t_build_lein() {
         '{"type": "build", "builder": "lein", "git-url": "%s", "branch": "%s"}'
 
     bust t trigger build --params \
-        git-url=git@bitbucket.org:flowgir/buster.git branch=master
+        git-url=git@bitbucket.org:flowgir/noci.git branch=master
 
     bust j log --follow
 }
@@ -20,7 +20,7 @@ t_build_lein_interrupt() {
         '{"type": "build", "builder": "lein", "git-url": "%s", "branch": "%s"}'
 
     bust t trigger build --params \
-        git-url=git@bitbucket.org:flowgir/buster.git branch=master
+        git-url=git@bitbucket.org:flowgir/noci.git branch=master
     sleep 2
     bust j action stop
 
