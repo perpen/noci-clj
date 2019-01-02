@@ -1,0 +1,12 @@
+/checkouts
+*.class
+/classes
+*.jar
+/.kak.tags.namecache
+/.lein-*
+/lib
+/.nrepl-port
+pom.xml
+pom.xml.asc
+/tags
+/target
