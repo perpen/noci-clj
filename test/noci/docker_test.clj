@@ -18,14 +18,15 @@
                   :exit-status 0
                   :image ..image..
                   :dir ..dir..
-                  :log* ["Running command: 'timeout' '10m' 'docker' 'run' '..image..'"
+                  :log* ["Running command: 'docker' 'run' '..image..'"
                          "  from directory ..dir.."
                          "Exit status 0"]
                   :rag :green
                   :status-message "Ran successfully"
                   :user ..user..}
              (provided
-              (#'j/run-helper anything ["timeout" "10m" "docker" "run" ..image..]) => 0))
+              (#'j/run-helper anything ["docker" "run" ..image..]
+                              :dir ..dir..) => 0))
 
        (fact "happy with args and volumes"
              (testing/exercise job {:user ..user..
@@ -41,17 +42,18 @@
                   :args [..arg-1.. ..arg-2..]
                   :volumes [..vol-1.. ..vol-2..]
                   :dir ..dir..
-                  :log* ["Running command: 'timeout' '10m' 'docker' 'run' '-v' '/mnt/..vol-1..:/mnt/..vol-1..' '-v' '/mnt/..vol-2..:/mnt/..vol-2..' '..image..' '..arg-1..' '..arg-2..'"
+                  :log* ["Running command: 'docker' 'run' '-v' '/mnt/..vol-1..:/mnt/..vol-1..' '-v' '/mnt/..vol-2..:/mnt/..vol-2..' '..image..' '..arg-1..' '..arg-2..'"
                          "  from directory ..dir.."
                          "Exit status 0"]
                   :rag :green
                   :status-message "Ran successfully"
                   :user ..user..}
              (provided
-              (#'j/run-helper anything ["timeout" "10m" "docker" "run"
+              (#'j/run-helper anything ["docker" "run"
                                         "-v" "/mnt/..vol-1..:/mnt/..vol-1.."
                                         "-v" "/mnt/..vol-2..:/mnt/..vol-2.."
-                                        ..image.. ..arg-1.. ..arg-2..]) => 0))
+                                        ..image.. ..arg-1.. ..arg-2..]
+                              :dir ..dir..) => 0))
 
        (fact "docker command error"
              (testing/exercise-exception job {:user ..user..
@@ -63,11 +65,12 @@
                   :exit-status 666
                   :image ..image..
                   :dir ..dir..
-                  :log* ["Running command: 'timeout' '10m' 'docker' 'run' '..image..'"
+                  :log* ["Running command: 'docker' 'run' '..image..'"
                          "  from directory ..dir.."
                          "Exit status 666"]
                   :rag :amber
                   :status-message "Running"
                   :user ..user..}
              (provided
-              (#'j/run-helper anything ["timeout" "10m" "docker" "run" ..image..]) => 666)))
+              (#'j/run-helper anything ["docker" "run" ..image..]
+                              :dir ..dir..) => 666)))

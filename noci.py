@@ -16,12 +16,11 @@ def fatal(msg):
 
 
 def c(style, s):
-    # If needs to be customisable, store in ~/.bust.json?
+    # If needs to be customisable, store in ~/.noci.json?
     styles = {
         'key': [Style.BRIGHT],
         'status': [Style.RESET_ALL],
-        'time': [Fore.GREEN],
-        'user': [Fore.CYAN],
+        'time': [Fore.CYAN],
         'actions': [Fore.RED, Style.BRIGHT],
         'default': [Style.RESET_ALL],
         'stdout': [Fore.BLUE],
@@ -30,18 +29,19 @@ def c(style, s):
     return "".join(styles[style]) + s + Style.RESET_ALL
 
 
-def rag_symbol(s):
+def rag_symbol(rag, job_key):
     return {
-        'red': '💥',
-        'green': ' ✔',
-        'blue': '🏃',
-        'amber': '🔥',
-    }.get(s, s)
+        # 💥✔🏃🔥
+        'red': Fore.RED + 'R',
+        'green': Fore.GREEN + 'G',
+        'blue':  Fore.BLUE + 'B',
+        'amber':  Fore.YELLOW + 'A',
+    }.get(rag) + ' ' + job_key
 
 
 class Config:
     def __init__(self):
-        self.path = '%s/.bust.json' % os.environ['HOME']
+        self.path = '%s/.noci.json' % os.environ['HOME']
         self.data = None
         try:
             with open(self.path, 'r') as f:
@@ -58,7 +58,12 @@ class Config:
         return d['instances']
 
     def get_instance_url(self, name):
-        return self.data['instances'][name]['url']
+        if not name:
+            fatal("no instance selected")
+        instance = self.data['instances']
+        if not instance or not instance.get(name):
+            fatal("no instance with name %s" % name)
+        return instance[name]['url']
 
     def set_default_instance(self, name):
         self.data['default_instance'] = name
@@ -110,12 +115,9 @@ class Api:
         if full:
             params_s = '\n' + pprint.pformat(job['params'])
         return ''.join([
-            rag_symbol(job['rag']),
-            ' ',
-            c('key', job['key']),
-            ' ',
-            c('status', job['status-message']),
-            ' ',
+            rag_symbol(job['rag'], job['num'] + ' ' + job['key']), ' ',
+            # rag_symbol(job['rag'], job['num'] + ' ' + job['type']), ' ',
+            c('status', job['status-message']), ' ',
             actions_s,
             params_s,
         ])
@@ -149,8 +151,12 @@ class Api:
         self._die_on_error_status(resp)
 
     def _headers(self, instance):
+        auth_header = None
+        token = self.config.get_instance_token(instance)
+        if token:
+            auth_header = 'Token ' + token
         return {
-            'auth-token': self.config.get_instance_token(instance),
+            'Authorization': auth_header,
             'Accept': 'application/json',
             'Content-type': 'application/json',
         }
@@ -168,14 +174,14 @@ class Api:
 
 
 class ServersApi(Api):
-    def list(self, args):
+    def ls(self, args):
         for name, instance in self.config.get_instances().items():
             print(name, instance['url'])
 
     def register(self, args):
         print('Registering %s as "%s"' % (args.url, args.name))
         self.config.add_instance(args.url, args.name)
-        if args.make_default:
+        if args.make_default or len(self.config.get_instances()) == 1:
             print('Setting default instance to %s' % args.name)
             self.config.set_default_instance(args.name)
 
@@ -196,7 +202,7 @@ class ServersApi(Api):
 
 
 class JobsApi(Api):
-    def list(self, args):
+    def ls(self, args):
         print('Listing jobs on instance %s, full=%s' % (args.instance,
                                                         args.full))
         jobs = self._get(args.instance, "/jobs", params={"limit": args.limit})
@@ -217,13 +223,10 @@ class JobsApi(Api):
                             {'start': start})
             # print(job)
             for line in job['log']:
-                username = line['user'] or "self    "
                 t1 = time.strptime(line['time'], "%Y-%m-%dT%H:%M:%SZ")
                 t2 = time.strftime('%H:%M:%S', t1)
                 style = line['style-hint'] or 'default'
-                print(
-                    c('time', t2), c('user', username),
-                    c(style, line['message']))
+                print(c('time', t2), c(style, line['message']))
             if not args.follow or job.get('dead'):
                 break
             start += len(job['log'])
@@ -256,7 +259,7 @@ class TriggersApi(Api):
         trigger = self._get(args.instance, "/triggers/%s" % args.name)
         print(self._trigger_description(args.instance, args.name, trigger))
 
-    def list(self, args):
+    def ls(self, args):
         print('Listing triggers on instance %s' % (args.instance))
         triggers = self._get(args.instance, "/triggers")
         for name, trigger in triggers.items():
@@ -337,9 +340,9 @@ class CommandLineParser:
         servers_parser = argparse.ArgumentParser(prog=prog + ' servers')
         servers_subparsers = servers_parser.add_subparsers()
 
-        # "servers list"
-        parser_servers_list = servers_subparsers.add_parser('list')
-        parser_servers_list.set_defaults(func=self.servers_api.list)
+        # "servers ls"
+        parser_servers_ls = servers_subparsers.add_parser('ls')
+        parser_servers_ls.set_defaults(func=self.servers_api.ls)
 
         # "servers register"
         parser_servers_register = servers_subparsers.add_parser('register')
@@ -372,13 +375,13 @@ class CommandLineParser:
         jobs_parser = argparse.ArgumentParser(prog=prog + ' jobs')
         jobs_subparsers = jobs_parser.add_subparsers()
 
-        # "jobs list"
-        parser_jobs_list = jobs_subparsers.add_parser('list')
-        parser_jobs_list.add_argument('--full', action='store_true')
-        parser_jobs_list.add_argument(
+        # "jobs ls"
+        parser_jobs_ls = jobs_subparsers.add_parser('ls')
+        parser_jobs_ls.add_argument('--full', action='store_true')
+        parser_jobs_ls.add_argument(
             '--instance', default=self.default_instance)
-        parser_jobs_list.add_argument('--limit', default=15)
-        parser_jobs_list.set_defaults(func=self.jobs_api.list)
+        parser_jobs_ls.add_argument('--limit', default=15)
+        parser_jobs_ls.set_defaults(func=self.jobs_api.ls)
 
         # "jobs status"
         parser_jobs_status = jobs_subparsers.add_parser('status')
@@ -420,13 +423,13 @@ class CommandLineParser:
         triggers_parser = argparse.ArgumentParser(prog=prog + ' triggers')
         triggers_subparsers = triggers_parser.add_subparsers()
 
-        # "triggers list"
-        parser_triggers_list = triggers_subparsers.add_parser('list')
-        parser_triggers_list.add_argument('--ongoing', action='store_true')
-        parser_triggers_list.add_argument(
+        # "triggers ls"
+        parser_triggers_ls = triggers_subparsers.add_parser('ls')
+        parser_triggers_ls.add_argument('--ongoing', action='store_true')
+        parser_triggers_ls.add_argument(
             '--instance', default=self.default_instance)
-        parser_triggers_list.add_argument('--filter')
-        parser_triggers_list.set_defaults(func=self.triggers_api.list)
+        parser_triggers_ls.add_argument('--filter')
+        parser_triggers_ls.set_defaults(func=self.triggers_api.ls)
 
         # "triggers info"
         parser_triggers_info = triggers_subparsers.add_parser('info')

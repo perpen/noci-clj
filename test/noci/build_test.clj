@@ -38,9 +38,12 @@
                   :status-message "Build successful"
                   :user ..user..}
              (provided
-              (#'j/run-helper anything ["git" "clone" ..url.. ..dir..]) => 0
-              (#'j/run-helper anything ["lein" "uberjar"]) => 0
-              (#'j/run-helper anything ["lein" "install"]) => 0))
+              (#'j/run-helper anything ["git" "clone" ..url.. ..dir..]
+                              :dir ..dir..) => 0
+              (#'j/run-helper anything ["lein" "uberjar"]
+                              :dir ..dir..) => 0
+              (#'j/run-helper anything ["lein" "install"]
+                              :dir ..dir..) => 0))
 
        (fact "git clone error"
              (testing/exercise-exception job {:user ..user..
@@ -67,7 +70,8 @@
                   :status-message "Building"
                   :user ..user..}
              (provided
-              (#'j/run-helper anything ["git" "clone" ..url.. ..dir..]) => 666))
+              (#'j/run-helper anything ["git" "clone" ..url.. ..dir..]
+                              :dir ..dir..) => 666))
 
        (fact "lein uberjar error"
              (testing/exercise-exception job {:user ..user..
@@ -97,5 +101,7 @@
                   :status-message "Building"
                   :user ..user..}
              (provided
-              (#'j/run-helper anything ["git" "clone" ..url.. ..dir..]) => 0
-              (#'j/run-helper anything ["lein" "uberjar"]) => 666)))
+              (#'j/run-helper anything ["git" "clone" ..url.. ..dir..]
+                              :dir ..dir..) => 0
+              (#'j/run-helper anything ["lein" "uberjar"]
+                              :dir ..dir..) => 666)))

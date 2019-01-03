@@ -1,0 +1,521 @@
+#!/usr/bin/env python
+
+from __future__ import with_statement
+from __future__ import absolute_import
+import sys
+import os
+import json
+import argparse
+import requests
+import time
+import pprint
+from colorama import Fore, Style, init
+from io import open
+
+
+def fatal(msg):
+    sys.stderr.write(msg + u"\n")
+    sys.exit(1)
+
+
+def c(style, s):
+    # If needs to be customisable, store in ~/.noci.json?
+    styles = {
+        u'key': [Style.BRIGHT],
+        u'status': [Style.RESET_ALL],
+        u'time': [Fore.CYAN],
+        u'actions': [Fore.RED, Style.BRIGHT],
+        u'default': [Style.RESET_ALL],
+        u'stdout': [Fore.BLUE],
+        u'stderr': [Fore.RED],
+    }
+    return u"".join(styles[style]) + s + Style.RESET_ALL
+
+
+def rag_symbol(rag, job_key):
+    return {
+        # 💥✔🏃🔥
+        u'red': Fore.RED + u'R',
+        u'green': Fore.GREEN + u'G',
+        u'blue':  Fore.BLUE + u'B',
+        u'amber':  Fore.YELLOW + u'A',
+    }.get(rag) + u' ' + job_key
+
+
+class Config(object):
+    def __init__(self):
+        self.path = u'%s/.noci.json' % os.environ[u'HOME']
+        self.data = None
+        try:
+            with open(self.path, u'r') as f:
+                self.data = json.load(f)
+        except FileNotFoundError:
+            self.data = {u'instances': {}}
+
+    def get_instance(self, name):
+        d = self.data
+        return d[u'instances'].get(name)
+
+    def get_instances(self):
+        d = self.data
+        return d[u'instances']
+
+    def get_instance_url(self, name):
+        if not name:
+            fatal(u"no instance selected")
+        instance = self.data[u'instances']
+        if not instance or not instance.get(name):
+            fatal(u"no instance with name %s" % name)
+        return instance[name][u'url']
+
+    def set_default_instance(self, name):
+        self.data[u'default_instance'] = name
+
+    def get_default_instance(self):
+        return self.data.get(u'default_instance')
+
+    def set_last_job(self, job):
+        self.data[u'last_job'] = job
+
+    def get_last_job(self):
+        return self.data.get(u'last_job')
+
+    def set_last_trigger(self, trigger):
+        self.data[u'last_trigger'] = trigger
+
+    def clear_last_trigger(self):
+        del self.data[u'last_trigger']
+
+    def get_last_trigger(self):
+        return self.data.get(u'last_trigger')
+
+    def add_instance(self, url, name):
+        self.data[u'instances'][name] = {u'url': url}
+
+    def remove_instance(self, name):
+        del self.data[u'instances'][name]
+
+    def get_instance_token(self, name):
+        return self.data[u'instances'][name].get(u'token')
+
+    def set_instance_token(self, name, token):
+        self.data[u'instances'][name][u'token'] = token
+
+    def save(self):
+        with open(self.path, u'w') as f:
+            json.dump(self.data, f)
+
+
+class Api(object):
+    def __init__(self, config):
+        self.config = config
+
+    def _job_repr(self, job, instance, full=False):
+        actions_s = u''
+        if job[u'actions']:
+            actions_s = u'<- ' + c(u'actions', u', '.join(job[u'actions']))
+        params_s = u''
+        if full:
+            params_s = u'\n' + pprint.pformat(job[u'params'])
+        return u''.join([
+            rag_symbol(job[u'rag'], job[u'num'] + u' ' + job[u'key']), u' ',
+            # rag_symbol(job['rag'], job['num'] + ' ' + job['type']), ' ',
+            c(u'status', job[u'status-message']), u' ',
+            actions_s,
+            params_s,
+        ])
+
+    def _get(self, instance, path, params={}):
+        url = u"%s/api%s" % (self.config.get_instance_url(instance), path)
+        resp = requests.get(
+            url, params=params, headers=self._headers(instance))
+        self._die_on_error_status(resp)
+        return resp.json()
+
+    def _post(self, instance, path, payload, query_params={}):
+        url = u"%s/api%s" % (self.config.get_instance_url(instance), path)
+        resp = requests.post(
+            url,
+            json=payload,
+            params=query_params,
+            headers=self._headers(instance))
+        self._die_on_error_status(resp)
+        return resp.json()
+
+    def _put(self, instance, path, payload):
+        url = u"%s/api%s" % (self.config.get_instance_url(instance), path)
+        resp = requests.put(url, json=payload, headers=self._headers(instance))
+        self._die_on_error_status(resp)
+        return resp.json()
+
+    def _delete(self, instance, path):
+        url = u"%s/api%s" % (self.config.get_instance_url(instance), path)
+        resp = requests.delete(url, headers=self._headers(instance))
+        self._die_on_error_status(resp)
+
+    def _headers(self, instance):
+        auth_header = None
+        token = self.config.get_instance_token(instance)
+        if token:
+            auth_header = u'Token ' + token
+        return {
+            u'Authorization': auth_header,
+            u'Accept': u'application/json',
+            u'Content-type': u'application/json',
+        }
+
+    def _die_on_error_status(self, resp):
+        if resp.status_code >= 400:
+            msg = {
+                401: u"Unauthorised",
+                404: u"Unknown entity",
+                409: u"Conflict",
+                422: u"Invalid",
+            }.get(resp.status_code, u"Oops")
+            print >>sys.stderr, u"Error: " + msg + u" - " + resp.text
+            sys.exit(1)
+
+
+class ServersApi(Api):
+    def ls(self, args):
+        for name, instance in self.config.get_instances().items():
+            print name, instance[u'url']
+
+    def register(self, args):
+        print u'Registering %s as "%s"' % (args.url, args.name)
+        self.config.add_instance(args.url, args.name)
+        if args.make_default or len(self.config.get_instances()) == 1:
+            print u'Setting default instance to %s' % args.name
+            self.config.set_default_instance(args.name)
+
+    def unregister(self, args):
+        print u'Unregistering "%s"' % args.name
+        self.config.remove_instance(args.name)
+
+    def login(self, args):
+        print u'login to %s as %s' % (args.instance, args.username)
+        password = u"pa55word"
+        payload = {u'username': args.username, u'password': password}
+        auth = self._post(args.instance, u"/auth", payload)
+        self.config.set_instance_token(args.instance, auth[u'token'])
+
+    def select(self, args):
+        print u'Setting default instance to %s' % args.instance
+        self.config.set_default_instance(args.instance)
+
+
+class JobsApi(Api):
+    def ls(self, args):
+        print u'Listing jobs on instance %s, full=%s' % (args.instance,
+                                                        args.full)
+        jobs = self._get(args.instance, u"/jobs", params={u"limit": args.limit})
+        for job in jobs:
+            print self._job_repr(job, args.instance, full=args.full)
+
+    def status(self, args):
+        job = self._get(args.instance, u"/jobs/%s" % args.job, {u'full': True})
+        print self._job_repr(job, args.instance, full=True)
+
+    def log(self, args):
+        print u'Showing log for job %s on instance %s, follow=%s, start=%s' %
+              (args.job, args.instance, args.follow, args.start)
+        self.config.set_last_job(args.job)
+        start = args.start or 0
+        while True:
+            job = self._get(args.instance, u"/jobs/%s" % args.job,
+                            {u'start': start})
+            # print(job)
+            for line in job[u'log']:
+                t1 = time.strptime(line[u'time'], u"%Y-%m-%dT%H:%M:%SZ")
+                t2 = time.strftime(u'%H:%M:%S', t1)
+                style = line[u'style-hint'] or u'default'
+                print c(u'time', t2), c(style, line[u'message'])
+            if not args.follow or job.get(u'dead'):
+                break
+            start += len(job[u'log'])
+            time.sleep(1)
+        print self._job_repr(job, args.instance)
+
+    def action(self, args):
+        print (u'Performing action %s for job %s on instance %s, ' +
+               u'value=%s, comment=%s') % (args.action, args.job, args.instance,
+                                          args.value, args.comment)
+        path = u"/jobs/%s/actions/%s" % (args.job, args.action)
+        payload = {u"value": args.value, u"comment": args.comment}
+        job = self._put(args.instance, path, payload)
+        print self._job_repr(job, args.instance)
+
+    def start(self, args):
+        payload_parsed = json.loads(args.payload)
+        print payload_parsed
+        self._start(args.instance, payload_parsed)
+
+    def _start(self, instance, payload_parsed):
+        job = self._post(instance, u"/jobs", payload_parsed)
+        print self._job_repr(job, instance)
+        job_key = job[u'key']
+        self.config.set_last_job(job_key)
+
+
+class TriggersApi(Api):
+    def info(self, args):
+        trigger = self._get(args.instance, u"/triggers/%s" % args.name)
+        print self._trigger_description(args.instance, args.name, trigger)
+
+    def ls(self, args):
+        print u'Listing triggers on instance %s' % (args.instance)
+        triggers = self._get(args.instance, u"/triggers")
+        for name, trigger in triggers.items():
+            print self._trigger_description(
+                    args.instance, name, trigger, full=False)
+
+    def create(self, args):
+        name = args.name
+        try:
+            payload_parsed = json.loads(args.payload)
+        except json.decoder.JSONDecodeError:
+            print u"payload json not valid: %s" % args.payload
+            sys.exit(1)
+        trigger = self._post(args.instance, u"/triggers/%s" % name,
+                             payload_parsed)
+        print self._trigger_description(args.instance, trigger, name)
+        self.config.set_last_trigger(name)
+
+    def delete(self, args):
+        self._delete(args.instance, u"/triggers/%s" % args.name)
+        self.config.clear_last_trigger()
+
+    def trigger(self, args):
+        query_params = {}
+        if args.params:
+            for param in args.params:
+                k, v = param.split(u"=")
+                query_params[k] = v
+        job = self._post(
+            args.instance,
+            u"/triggers/%s/job" % args.name, {},
+            query_params=query_params)
+        print self._job_repr(job, args.instance)
+        job_key = job[u'key']
+        self.config.set_last_job(job_key)
+
+    def _trigger_description(self, instance, name, trigger, full=False):
+        return u"%s\t%s" % (name, trigger)
+
+
+class SecretsApi(Api):
+    def status(self, args):
+        resp = self._get(args.instance, u"/unseal")
+        if resp[u'status']:
+            print u"unsealed"
+        else:
+            print u"sealed"
+
+    def unseal(self, args):
+        resp = self._post(args.instance, u"/unseal", {u"secret": args.secret})
+        if resp[u'status']:
+            print u"unsealed"
+        else:
+            print u"unsealing failed"
+
+
+class CommandLineParser(object):
+    def __init__(self, config):
+        self.default_instance = config.get_default_instance()
+        self.last_job = config.get_last_job()
+        self.last_trigger = config.get_last_trigger()
+        self.servers_api = ServersApi(config)
+        self.jobs_api = JobsApi(config)
+        self.triggers_api = TriggersApi(config)
+        self.secrets_api = SecretsApi(config)
+
+    def _usage(self):
+        s = u'Usage: %s {servers,jobs,triggers} ... [--help,-h]' % sys.argv[0]
+        print >>sys.stderr, s
+        sys.exit(2)
+
+    def parse(self, argv):
+        prog = argv[0]
+
+        # servers ####################
+
+        servers_parser = argparse.ArgumentParser(prog=prog + u' servers')
+        servers_subparsers = servers_parser.add_subparsers()
+
+        # "servers ls"
+        parser_servers_ls = servers_subparsers.add_parser(u'ls')
+        parser_servers_ls.set_defaults(func=self.servers_api.ls)
+
+        # "servers register"
+        parser_servers_register = servers_subparsers.add_parser(u'register')
+        parser_servers_register.add_argument(
+            u'--make-default', action=u'store_true')
+        parser_servers_register.add_argument(u'url')
+        parser_servers_register.add_argument(u'name')
+        parser_servers_register.set_defaults(func=self.servers_api.register)
+
+        # "servers unregister"
+        parser_servers_unregister = servers_subparsers.add_parser(u'unregister')
+        parser_servers_unregister.add_argument(u'name')
+        parser_servers_unregister.set_defaults(
+            func=self.servers_api.unregister)
+
+        # "servers login"
+        parser_servers_login = servers_subparsers.add_parser(u'login')
+        parser_servers_login.add_argument(u'username')
+        parser_servers_login.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_servers_login.set_defaults(func=self.servers_api.login)
+
+        # "servers select"
+        parser_servers_select = servers_subparsers.add_parser(u'select')
+        parser_servers_select.add_argument(u'instance')
+        parser_servers_select.set_defaults(func=self.servers_api.select)
+
+        # jobs ####################
+
+        jobs_parser = argparse.ArgumentParser(prog=prog + u' jobs')
+        jobs_subparsers = jobs_parser.add_subparsers()
+
+        # "jobs ls"
+        parser_jobs_ls = jobs_subparsers.add_parser(u'ls')
+        parser_jobs_ls.add_argument(u'--full', action=u'store_true')
+        parser_jobs_ls.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_jobs_ls.add_argument(u'--limit', default=15)
+        parser_jobs_ls.set_defaults(func=self.jobs_api.ls)
+
+        # "jobs status"
+        parser_jobs_status = jobs_subparsers.add_parser(u'status')
+        parser_jobs_status.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_jobs_status.add_argument(
+            u'job', nargs=u'?', default=self.last_job)
+        parser_jobs_status.set_defaults(func=self.jobs_api.status)
+
+        # "jobs log"
+        parser_jobs_log = jobs_subparsers.add_parser(u'log')
+        parser_jobs_log.add_argument(u'--start', type=int)
+        parser_jobs_log.add_argument(u'--follow', action=u'store_true')
+        parser_jobs_log.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_jobs_log.add_argument(u'job', nargs=u'?', default=self.last_job)
+        parser_jobs_log.set_defaults(func=self.jobs_api.log)
+
+        # "jobs start"
+        parser_jobs_start = jobs_subparsers.add_parser(u'start')
+        parser_jobs_start.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_jobs_start.add_argument(u'payload')
+        parser_jobs_start.set_defaults(func=self.jobs_api.start)
+
+        # "jobs action"
+        parser_jobs_action = jobs_subparsers.add_parser(u'action')
+        parser_jobs_action.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_jobs_action.add_argument(
+            u'job', nargs=u'?', default=self.last_job)
+        parser_jobs_action.add_argument(u'action')
+        parser_jobs_action.add_argument(u'--value')
+        parser_jobs_action.add_argument(u'--comment')
+        parser_jobs_action.set_defaults(func=self.jobs_api.action)
+
+        # triggers ####################
+
+        triggers_parser = argparse.ArgumentParser(prog=prog + u' triggers')
+        triggers_subparsers = triggers_parser.add_subparsers()
+
+        # "triggers ls"
+        parser_triggers_ls = triggers_subparsers.add_parser(u'ls')
+        parser_triggers_ls.add_argument(u'--ongoing', action=u'store_true')
+        parser_triggers_ls.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_triggers_ls.add_argument(u'--filter')
+        parser_triggers_ls.set_defaults(func=self.triggers_api.ls)
+
+        # "triggers info"
+        parser_triggers_info = triggers_subparsers.add_parser(u'info')
+        parser_triggers_info.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_triggers_info.add_argument(
+            u'name', nargs=u'?', default=self.last_trigger)
+        parser_triggers_info.set_defaults(func=self.triggers_api.info)
+
+        # "triggers create"
+        parser_triggers_create = triggers_subparsers.add_parser(u'create')
+        parser_triggers_create.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_triggers_create.add_argument(u'name')
+        parser_triggers_create.add_argument(u'payload')
+        parser_triggers_create.set_defaults(func=self.triggers_api.create)
+
+        # "triggers delete"
+        parser_triggers_info = triggers_subparsers.add_parser(u'delete')
+        parser_triggers_info.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_triggers_info.add_argument(
+            u'name', nargs=u'?', default=self.last_trigger)
+        parser_triggers_info.set_defaults(func=self.triggers_api.delete)
+
+        # "triggers trigger"
+        parser_triggers_info = triggers_subparsers.add_parser(u'trigger')
+        parser_triggers_info.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_triggers_info.add_argument(u'--params', nargs=u'*')
+        parser_triggers_info.add_argument(
+            u'name', nargs=u'?', default=self.last_trigger)
+        parser_triggers_info.set_defaults(func=self.triggers_api.trigger)
+
+        # unseal ####################
+
+        secrets_parser = argparse.ArgumentParser(prog=prog + u' secrets')
+        secrets_subparsers = secrets_parser.add_subparsers()
+
+        # "secrets status"
+        parser_secrets_info = secrets_subparsers.add_parser(u'status')
+        parser_secrets_info.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_secrets_info.set_defaults(func=self.secrets_api.status)
+
+        # "secrets unseal"
+        parser_secrets_create = secrets_subparsers.add_parser(u'unseal')
+        parser_secrets_create.add_argument(
+            u'--instance', default=self.default_instance)
+        parser_secrets_create.add_argument(u'secret')
+        parser_secrets_create.set_defaults(func=self.secrets_api.unseal)
+
+        # Invoke relevant parser
+        if len(sys.argv) == 1:
+            self._usage()
+        argv.pop(0)
+        parser = {
+            u'j': jobs_parser,
+            u'jobs': jobs_parser,
+            u'servers': servers_parser,
+            u's': servers_parser,
+            u'triggers': triggers_parser,
+            u't': triggers_parser,
+            u'secrets': secrets_parser,
+        }.get(sys.argv[0])
+        if not parser:
+            self._usage()
+
+        if len(argv) == 1:
+            argv.append(u"-h")
+
+        argv.pop(0)
+        args = parser.parse_args(argv)
+        args.func(args)
+
+
+init()  # colorama
+config = Config()
+try:
+    CommandLineParser(config).parse(sys.argv)
+except KeyboardInterrupt:
+    print u"\nInterrupted"
+    sys.exit(1)
+except requests.exceptions.ConnectionError, e:
+    print u"Cannot connect:", e
+    sys.exit(1)
+config.save()

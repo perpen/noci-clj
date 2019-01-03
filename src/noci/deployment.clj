@@ -43,15 +43,11 @@
 
 (defn start
   [job]
-  (let [{user :user
-         env :env
-         app :app
-         version :version
-         cr :cr} @job
+  (let [{:keys [user env app version cr]} @job
         intro (str "Deploying bundle-" app " " version " into " env)
         env (keyword env)]
     (-> job
-        (j/log intro :user user)
+        (j/log intro)
         (j/assign {:rag :amber, :actions #{:stop}})
         (create-cr-await-approval env cr intro)
         (j/check-for-interrupt)
@@ -69,9 +65,7 @@
 (defn stop
   [job action params]
   (if (j/get-process job)
-    (let [{user :user
-           comment :comment} params]
+    (let [{:keys [user comment]} params]
       (-> job
-          (j/log (str "Stopping process - comment: " comment)
-                 :user user)
+          (j/log (str "Stopping process - comment: " comment))
           (j/interrupt)))))

@@ -3,6 +3,7 @@
             [clojure.tools.trace :as trace]
             [noci.handler :refer [run-reload-server]]
             [noci.auth :as auth]
+            [noci.main :as main]
             [noci.handler :as handler]
             [noci.job :as j]
             [noci.trigger :as t]

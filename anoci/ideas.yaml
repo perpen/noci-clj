@@ -1,0 +1,143 @@
+# Hmm
+# Why can't params be handled by build.sh?
+# entrypoint.sh?
+# uberjars can be run directly, no need for "java -jar"?
+# Useful to run a job w/o committing to git?
+
+# CONTEXT:
+# If no .nocignore is provided, will use .gitignore and .dockerignore
+
+# Locked mode:
+# No need, just a set of jobs with less available parameters.
+
+# Secrets:
+# Required by noci: nexus, docker, helm
+#   .m2/settings.xml
+#   docker login ...
+#   ~/.helm/*.key
+
+secrets:
+    maven:
+        template: # use eg mustache
+            src: m2-settings.xml
+            tgt: ~/.m2/settings.xml
+    helm:
+        write:
+            src: uat/k8s/helm/ca
+            tgt: ~/.helm/ca.key
+
+docker-image-build:
+    # will run the script locally in a temp dir
+    image: none
+    image: vbox/blah
+    vagrant: blah
+    # 2nd job with same params will be queued
+    parallel: false
+    params:
+        - tag
+        # will require a tar.gz to be provided, and we will extract and cd into the dir
+        - CONTEXT
+    run: |
+        cd [CONTEXT]
+        docker build -t [tag] .
+        # scan with nexus iq, stop if vulnerabilities
+        docker push [tag]
+    secrets:
+        - docker-hosted/writer
+
+jira-close-tickets:
+    image: java8
+    targets:
+        uat:
+            jira: "https://jira.hk.hsbc"
+            jira: jira-prd
+            # or we let the app itself lookup the targets
+    autostart: true
+    schedule:
+        repeat: 10m
+    params:
+        commit: {}
+    run: |
+        git clone git@github.com:perpen/tooling-utilities.git src
+        cd src
+        git checkout [commit]
+        lein test
+        lein run jira-close 10m
+    secrets:
+        - prd/jira/admin
+
+# pointless, artifact
+tooling-utilities:
+    image: java8
+    params:
+        branch:
+            default: master
+    secrets:
+        ~/.lein/profiles.clj
+    dirs:
+        source: https://stash/fxt/tooling-utilities.git?branch=[branch]
+        git:
+            repo: https://stash/fxt/tooling-utilities.git
+            branch: [branch]
+    run: [source]/build.sh
+    run: |
+        cd [source]
+        lein release
+
+# pointless, artifact
+bundle-builder:
+    image: basic
+    params:
+        bundle:
+            regex: "(jira|confluence)"
+        branch:
+            default: master
+    dirs:
+        source: https://stash/fxt/bundle-[bundle].git?branch=[branch]
+        git:
+            repo: https://stash/fxt/bundle-[bundle].git
+            branch: [branch]
+    run: [source]/build.sh
+    run: |
+        cd [source]
+        lein release
+
+marks-reporting:
+    image: python3
+    dirs:
+        source: https://stash/fxt/reporting.git
+    run: |
+        cd [source]
+        python main.py
+
+deployer:
+    image: ansible:2
+    dirs:
+        source: https://stash/fxt/ansible-deployer.git
+    test: cd [source] && python test.py
+    params:
+        app: {}
+        version: {}
+        env:
+            regex: "(uat|prd)"
+    run: |
+        cd [source]
+        ./trigger-and-gsd-stuff.sh [app] [version] [env]
+        # store the fact it was deployed to [env]
+        msg="$app-$version"
+        echo "deployed $msg to $env" > msg
+        stags sign ~/.stag-keys/ msg noci-uat
+        # upload msg to nexus
+
+uberchart:
+    image: basic
+    dirs:
+        template: https://efx-nexus/tools/uberchart-template.tar.gz
+        code: http://stash/fxt/helm-deployer.git
+    params:
+        - image
+        - ...
+    run: |
+        cd [code]
+        curl -o- http://efx-nexus/tools/helm.tar.gz | tar xfz -
+        ./helm.sh [template] [image] [...]

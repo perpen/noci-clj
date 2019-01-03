@@ -54,9 +54,7 @@
 
 (defn start
   [job]
-  (let [job-map @job
-        {user :user
-         version :version} job-map]
+  (let [{:keys [user version]} @job]
     (-> job
         (j/assign {:status-message "Upgrading", :rag :amber, :actions #{:stop}})
         (j/log (str "Upgrading noci to " version) user)
@@ -65,9 +63,7 @@
 (defn stop
   [job action params]
   (if (j/get-process job)
-    (let [{user :user
-           comment :comment} params]
+    (let [{:keys [user comment]} params]
       (-> job
-          (j/log (str "Stopping process - comment: " comment)
-                 :user user)
+          (j/log (str "Stopping process - comment: " comment))
           (j/interrupt)))))

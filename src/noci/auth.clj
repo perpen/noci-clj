@@ -1,26 +1,9 @@
 (ns noci.auth
-  (:require [noci.utils :as utils]))
+  (:require [noci.utils :as utils]
+            [buddy.sign.jwt :as jwt]
+            [clj-time.core :as time]))
 
-(def ttl-in-seconds (* 30 60 1000))
-
-(defonce tokens (atom {}))
-
-(defn clear-tokens []
-  (reset! tokens {}))
-
-(defn get-user-for-token
-  [token]
-  (get @tokens token))
-
-(defn valid?
-  [token]
-  (if-let [{time :time} (get-user-for-token token)]
-    ;; FIXME check age
-    true))
-
-(defn- make-href
-  [resource id]
-  (str "http://localhost:3000/" resource "/" id))
+(def token-ttl-seconds (* 60 60))
 
 (defn- ldap-authenticated?
   [username password]
@@ -29,19 +12,18 @@
 (defn- ldap-user-details
   [username]
   {:username username
+   :display-name "Joe"
    :groups #{"a" "b"}})
+
+(def jwt-secret "FIXME")
 
 (defn create-token
   [username password]
   (if (ldap-authenticated? username password)
     (let [user-details (ldap-user-details username)
-          token (utils/generate-random-string)
-          token-details (assoc user-details
-                               :href (make-href "auth" token)
-                               :time (utils/now))]
-      (swap! tokens assoc token token-details)
+          claim (assoc user-details
+                       :exp (time/plus (time/now) (time/seconds token-ttl-seconds)))
+          token (jwt/sign claim jwt-secret)]
       token)))
 
-(defn invalidate-token
-  [token]
-  (swap! tokens dissoc token))
+(defn get-user-for-token [& _] nil)

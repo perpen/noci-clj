@@ -6,12 +6,11 @@
 
 (facts "about jobs"
        #_(fact "log"
-               (let [x @(log (agent {:x 1 :log []}) ..msg.. ..user..)]
+               (let [x @(log (agent {:x 1 :log []}) ..msg..)]
                  (Thread/sleep 1000)
                  x)
                => {:x 1
-                   :log [{:user ..user..
-                          :time ..time..
+                   :log [{:time ..time..
                           :message ..msg..}]}
                (provided
                 (utils/now) => ..time..)))

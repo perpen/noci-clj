@@ -7,23 +7,23 @@
             [ring.middleware.json :as middleware-json]
             [ring.middleware.reload :refer [wrap-reload]]
             [ring.middleware.cors :refer [wrap-cors]]
-            [ring.adapter.jetty :refer [run-jetty]]
+            [ring.logger :as logger]
             [ring.util.response :as response]
+            [ring.adapter.jetty :refer [run-jetty]]
+            [buddy.auth.backends :as backends]
+            [buddy.auth.middleware :refer [wrap-authentication]]
+            [buddy.auth.accessrules :as access]
             [spyscope.core :refer :all]
             [noci.job :as j]
             [noci.trigger :as t]
             [noci.secrets :as secrets]
             [noci.utils :as utils]
-            [noci.auth :as auth])
-  (:gen-class))
+            [noci.auth :as auth]))
 
 (defn- make-response
   [status data]
   (-> (response/response data)
       (response/status status)))
-
-(defn- response-unauthorised [msg]
-  (make-response 401 msg))
 
 (defn- response-conflict [msg]
   (make-response 409 msg))
@@ -65,7 +65,7 @@
                       true v)])
                template))))
 
-(defn- cleanup-job-map
+(defn- job-response
   "Removes things we don't want returned to clients, and trims
   the log according to `log-start-index` param."
   [job-map & {:keys [log-start-index] :or {log-start-index -10}}]
@@ -77,7 +77,7 @@
                         (drop log-start-index log)
                         (take-last (- log-start-index) log))]
       (-> job-map
-          (dissoc :process)
+          (dissoc :process :dir)
           (assoc :log (or trimmed-log []))))))
 
 (defn- lookup-job-function
@@ -90,17 +90,18 @@
       (catch Exception e
         nil))))
 
-(defn- call-start [params]
+(defn- call-start [params user]
   (if-let [job-type (:type params)]
     (if-let [start-function (lookup-job-function job-type 'start)]
-      (let [job-seed (assoc params
-                          ; hide token FIXME
-                            :params (dissoc params :user))
-            job (j/create job-seed job-type)
+      (let [job (j/create params job-type user)
             job-seed @job]
         (future
-          (j/fg* job true (start-function job)))
-        (cleanup-job-map job-seed)))))
+          (j/job-> job true
+                   (start-function job)))
+        (job-response job-seed)))))
+
+; Details for the authenticated user
+(declare ^:dynamic auth-user)
 
 (defroutes api-routes
   (context "/api" []
@@ -113,10 +114,7 @@
     (POST "/triggers/:trigger-name" [trigger-name :as {params :body}]
       (if (t/get-trigger trigger-name)
         (response-conflict (str "trigger name already in use: " trigger-name))
-        (let [trigger (-> params
-                          (assoc :creator (-> params :user :username))
-                          (dissoc :user))]
-          (response-created (t/create trigger-name trigger)))))
+        (response-created (t/create trigger-name params))))
 
     ;; Trigger info
     (GET "/triggers/:trigger-name" [trigger-name]
@@ -138,7 +136,7 @@
     (POST "/triggers/:trigger-name/job" [trigger-name & params]
       (if-let [trigger (t/get-trigger trigger-name)]
         (let [params (interpolate trigger params)
-              job-map (call-start params)]
+              job-map (call-start params auth-user)]
           (response/response job-map))
         (response/not-found (str "no trigger with name: " trigger-name))))
 
@@ -147,16 +145,16 @@
     ;; Start a job
     (POST "/jobs" {params :body}
       (try
-        (if-let [job-map (call-start params)]
-          (response/response job-map))
-        (response-invalid (str "unknown job type: " (:type params)))))
+        (if-let [job-map (call-start params auth-user)]
+          (response/response job-map)
+          (response-invalid (str "unknown job type: " (:type params))))))
 
     ;; Job info
     (GET "/jobs/:job-id" [job-id start]
       (if-let [job (j/get-job job-id)]
-        (response/response (cleanup-job-map @job
-                                            :log-start-index
-                                            (if start (Integer. start))))
+        (response/response (job-response @job
+                                         :log-start-index
+                                         (if start (Integer. start))))
         (response/not-found (str "no job with id '" job-id "'"))))
 
     ;; Action against job
@@ -172,14 +170,17 @@
           true
           (let [job-type (:type @job)
                 action-function (lookup-job-function job-type (symbol action))
-                actioned-job (j/fg* job false (action-function job action params))]
-            (response/response (cleanup-job-map @actioned-job))))))
+                _ (if auth-user
+                    (j/log job (str "Action '" action "' by " (:display-name auth-user) " (" (:username auth-user) ")")))
+                actioned-job (j/job-> job false
+                                      (action-function job action params auth-user))]
+            (response/response (job-response @actioned-job))))))
 
     ;; List jobs
     (GET "/jobs" [limit]
       (let [limit (if limit (Integer. limit) 10)
             jobs (take-last limit (j/get-all-maps))]
-        (response/response (map cleanup-job-map jobs))))
+        (response/response (map job-response jobs))))
 
     ;;;;;;;;;;;;;;;;;;;;;;;;;;; auth
 
@@ -188,17 +189,6 @@
       (let [username (:username params)
             password (:password params)]
         (response/response {:token (auth/create-token username password)})))
-
-    ;; Auth token info
-    (GET "/auth/:token" [token]
-      (if-let [info (auth/get-user-for-token token)]
-        (response/response info)
-        (response/not-found (str "unknown token '" token "'"))))
-
-    ;; Invalidate token
-    (DELETE "/auth/:token" [token]
-      (do (auth/invalidate-token token)
-          (response-deleted "deleted")))
 
     ;;;;;;;;;;;;;;;;;;;;;;;;;;; unseal
 
@@ -215,52 +205,111 @@
 
     (route/not-found "no route")))
 
-(defn- auth-middleware
-  "For any other request than login or trigger, handle the auth-token header"
-  [handler]
-  (fn [request]
-    (let [unchecked? (and (or (= (:uri request) "/api/auth")
-                              (re-matches #"^/api/triggers/[^/]+/job$" (:uri request)))
-                          (= (:request-method request) :post))]
-      (if unchecked?
-        ;; Pass through
-        (handler request)
-        ;; Lookup user from token
-        (let [token (get-in request [:headers "auth-token"])
-              user (if token (auth/get-user-for-token token))]
-          (if user
-            (handler (assoc-in request [:body :user] user))
-            (response-unauthorised "missing or invalid auth token")))))))
-
 (defn- wrap-exceptions
   [handler]
   (fn [request]
     (try
-      (let [resp (handler request)]
-        (flush) ; for spyscope output
-        resp)
+      (handler request)
       (catch Exception e
         (println "CAUGHT by handler/wrap-exceptions" e)
         (response-system-error (.getMessage e))))))
 
+(defn- wrap-flush-for-spyscope
+  [handler]
+  (fn [request]
+    (flush)
+    (handler request)))
+
+(defn- wrap-logging
+  [handler]
+  (letfn [(log-fn [{:keys [level throwable message]}]
+            (logger/default-log-fn {:level level
+                                    :throwable throwable
+                                    :message (dissoc message
+                                                     :ring.logger/ms
+                                                     :ring.logger/type)}))]
+    (logger/wrap-log-response
+     handler
+     {:request-keys [:request-method :uri :params]
+      :log-fn log-fn})))
+
+(def locked? (atom false))
+
+(defn- wrap-permissioning [handler]
+  (letfn [(anonymous-ok [request] true)
+
+          (locked
+           [request]
+           (if (:identity request)
+             true
+             (access/error "Invalid action on locked instance")))
+
+          (authenticated
+           [request]
+           (if (:identity request)
+             true
+             (access/error "Auth token missing, invalid or expired")))]
+
+    (let [rules-open [; login
+                      {:uris ["/api/auth"]
+                       :request-method :post
+                       :handler anonymous-ok}
+                      ; anything else
+                      {:pattern #".*"
+                       :handler authenticated}]
+
+          rules-locked [; login
+                        {:uris ["/api/auth"]
+                         :request-method :post
+                         :handler anonymous-ok}
+                        ; job start
+                        {:uris ["/api/jobs"]
+                         :request-method :post
+                         :handler locked}
+                        ; trigger creation
+                        {:pattern #"^/api/trigger/[^/]+$"
+                         :request-method :post
+                         :handler locked}
+                        ; trigger deletion
+                        {:pattern #"^/api/trigger/[^/]+$"
+                         :request-method :delete
+                         :handler locked}
+                        ; anything else
+                        {:pattern #".*"
+                         :handler authenticated}]]
+
+      (fn [request]
+        (let [rules (if @locked? rules-locked rules-open)]
+          ((access/wrap-access-rules handler {:rules rules}) request))))))
+
+(defn- wrap-auth [handler]
+  (letfn [(bind-identity [handler]
+            (fn [request]
+              (binding [auth-user (:identity request)]
+                (handler request))))]
+    (let [backend (backends/jws {:secret auth/jwt-secret})]
+      (-> handler
+          bind-identity
+          wrap-permissioning
+          (wrap-authentication backend)))))
+
 (def app
   (routes
    (-> api-routes
+       wrap-auth
        wrap-exceptions
+       wrap-flush-for-spyscope
+       wrap-logging
        middleware-json/wrap-json-response
-       auth-middleware
+       (middleware-json/wrap-json-body {:keywords? true})
        (wrap-cors :access-control-allow-origin [#".*"]
                   :access-control-allow-methods [:get :put :post :delete])
-       (middleware-json/wrap-json-body {:keywords? true})
        (middleware/wrap-defaults middleware/api-defaults))))
 
 (def app-with-reload
   (wrap-reload #'app))
 
-(defn run-reload-server []
+(defn run-reload-server
+  "For development, run from repl."
+  []
   (ring.adapter.jetty/run-jetty #'app-with-reload {:port 3000 :join? false}))
-
-(defn -main [& args]
-  (let [port (Integer/valueOf (or (System/getenv "port") "3000"))]
-    (println "Starting on port" port)
-    (run-jetty app {:port port})))

@@ -6,7 +6,9 @@
             [clojure.core.async :as async]
             [clojure.java.io :as io]))
 
-(def jobs (atom {}))
+(defonce jobs (atom {}))
+
+(defonce job-seq (atom 0))
 
 (defn- make-uid
   [hint]
@@ -24,27 +26,14 @@
 (defn get-job [job-key]
   (get @jobs job-key))
 
-(defn get-action-function
-  [job]
-  (:action-function @job))
-
-(defn get-env
-  [job]
-  (:env @job))
-
 (defn get-dir
   [job]
   (await job)
   (:dir @job))
 
 (defn log
-  [job msg & {:keys [user style-hint]}]
-  (let [username (if (map? user)
-                   (:username user)
-                   #_(utils/fail :fatal "username in use?!")
-                   user)
-        log-entry {:time (utils/now)
-                   :user username
+  [job msg & {:keys [style-hint]}]
+  (let [log-entry {:time (utils/now)
                    :message msg
                    :style-hint style-hint}]
     (send job update-in [:log] conj log-entry)))
@@ -80,7 +69,8 @@
 
 (defn interrupt [job]
   (when-let [process (get-process job)]
-    (conch/destroy process))
+    (conch/destroy process)
+    (conch/done process))
   (assign job {:interrupt true, :rag :red, :status-message "Interrupted"})
   job)
 
@@ -95,37 +85,55 @@
   Until the process exits, the process object is available via `get-process`.
   Returns the exit status.
   The process can be stopped by calling `interrupt`."
-  [job command-line & {:keys [raise dir] :or {raise true}}]
-  (let [p (apply conch/proc (concat command-line [:dir dir]))]
+  [job command-line & {:keys [dir timeout-s]}]
+  (let [p (apply conch/proc (concat command-line [:dir dir]))
+        timeout-s (or timeout-s (* 60 60))]
     (set-process job p)
     (let [out-rdr (io/reader (:out p))
-          err-rdr (io/reader (:err p))
-          out-fut (future (doseq [line (line-seq out-rdr)]
-                            (log job line :style-hint "stdout")))
-          err-fut (future (doseq [line (line-seq err-rdr)]
-                            (log job line :style-hint "stderr")))]
-        ; Wait for both to close
-      [@out-fut, @err-fut])
-    (conch/done p)
-    (conch/exit-code p)))
+          err-rdr (io/reader (:err p))]
+      (future
+        (try
+          (doseq [line (line-seq out-rdr)]
+            (log job (str "> " line) :style-hint "stdout"))
+          (catch Exception e
+            nil)))
+      (future
+        (try
+          (doseq [line (line-seq err-rdr)]
+            (log job (str "> " line) :style-hint "stderr"))
+          (catch Exception e
+            nil))))
+    (let [code (conch/exit-code p (* timeout-s 1000))]
+      (conch/done p)
+      (set-process job nil)
+      code)))
 
 (defn run
   "Runs the command synchronously.
   For as long as it is running, the process object is available via
   `get-process`.
+  If `timeout-s` is specified, the process is stopped after this duration
+  and the returned value is :timeout.
   On completion the exit status is available via `set-exit-status`.
   The process can be stopped by calling `interrupt`."
-  [job command-line & {:keys [raise dir] :or {raise true}}]
+  [job command-line & {:keys [dir timeout-s]}]
   (let [dir (or dir (get-dir job))]
     (log job (str "Running command: '" (string/join "' '" command-line) "'"))
     (log job (str "  from directory " dir))
-    (let [status (run-helper job command-line)]
+    (if timeout-s
+      (log job (str "  with timeout " timeout-s "s")))
+    (let [args (flatten [job command-line
+                         :dir dir
+                         (if timeout-s [:timeout-s timeout-s] [])])
+          status (run-helper job command-line :dir dir)]
       (set-exit-status job status)
-      (log job (str "Exit status " status))
       (check-for-interrupt job)
-      (if (and raise (not (zero? status)))
-        (utils/fail :fatal)))
-    job))
+      (log job (if (= status :timeout)
+                 "Process timed out"
+                 (str "Exit status " status)))
+      (if (or (= status :timeout) (not (zero? status)))
+        (utils/fail :fatal))
+      job)))
 
 (def tmp-dir-root "/var/tmp/noci/")
 
@@ -137,23 +145,29 @@
       (fs/delete-dir dir)
       (utils/fail :achtung (str "refusing to cleanup job dir: " dir)))))
 
-(defn create [initial-data hint]
+(defn create [seed hint user]
   (let [job-key (make-uid hint)
+        job-num (swap! job-seq inc)
         dir (str "/var/tmp/noci/" (utils/generate-random-string))
-        initial-data (assoc initial-data
+        initial-data (assoc seed
                             :created (utils/now)
                             :key job-key
-                            :rag :green
+                            :num (str job-num)
+                            :rag :amber
                             :status-message "Starting"
                             :actions #{}
                             :dir dir
-                            :log [])
+                            :log []
+                            :params seed)
         agent-error-handler (fn [a e]
                               (println "Error against agent " a ": " e))
         job (agent initial-data
                    :error-handler agent-error-handler)]
     (fs/mkdirs dir)
     (swap! jobs assoc job-key job)
+    (if user
+      (log job (str "Job started by " (:display-name user) " (" (:username user) ")")))
+    (log job (str "Starting from seed: " seed))
     job))
 
 (defn mark-as-dead
@@ -176,13 +190,17 @@
     (log-exception job cause true)))
 
 (defmacro extra
+  "Eases the injection of arbitrary code into a (-> job ...) thread.
+   Evals the body, and always returns the job at the end."
   [job-var & body]
   `(let [job# ~job-var]
      (await job#)
      ~@body
      job#))
 
-(defmacro fg*
+(defmacro job->
+  "If `die?` then the job will die if an exception is thrown.
+   Meant to be called only when starting a job, or invoking an action."
   [job-var die? & body]
   `(try
      ~@body
@@ -208,56 +226,6 @@
        (if ~die?
          (mark-as-dead ~job-var)
          ~job-var))))
-
-(defmacro fg->
-  [job-var die? & body]
-  `(try
-     (-> ~job-var
-         ~@body)
-     (catch Throwable t#
-       ;; Log exception details against job
-       (if-let [data# (ex-data t#)]
-         ; Our own exception
-         (let [type# (:type data#)
-               msg# (:msg data#)]
-           (if (= type# :interrupt)
-             (log ~job-var "Interrupted")
-             (-> ~job-var
-                 (log (str "Fatal" (if msg# (str " - " msg#))))
-                 (assign {:interrupt true, :rag :red, :status-message "Error"}))))
-         ; Not exception of ours, log the full details
-         (do
-           (assign ~job-var {:status-message "Error", :rag :red})
-           (log-exception ~job-var t#)))
-       (await ~job-var)
-       ~job-var)
-     (finally
-       (if ~die?
-         (mark-as-dead ~job-var)
-         ~job-var))))
-
-(defmacro bg->
-  [job-var & body]
-  `(future
-     (fg-> ~job-var true ~@body)))
-
-(defmacro fg-action
-  "Executes the body. Catches throwables and logs the stack trace to the job.
-  Returns the job."
-  [job-var & body]
-  `(fg* ~job-var false ~@body))
-
-(defmacro fg
-  "Executes the body. Catches throwables and logs the stack trace to the job.
-  Finally, marks the job as dead.
-  Returns the job."
-  [job-var & body]
-  `(fg* ~job-var true ~@body))
-
-(defmacro bg
-  [job-var & body]
-  `(future
-     (fg ~job-var ~@body)))
 
 (defn git-clone
   [job git-url & {:keys [commit branch dir]}]

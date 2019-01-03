@@ -12,6 +12,7 @@
                  [ring "1.6.2"]
                  [ring/ring-json "0.4.0"]
                  [ring-cors "0.1.11"]
+                 [ring-logger "1.0.1"]
                  [buddy "2.0.0"]
                  [digest "1.4.8"]
                  [org.clojure/data.json "0.2.6"]
@@ -28,7 +29,7 @@
 
   :profiles
   {:uberjar {:aot :all
-             :main noci.handler}
+             :main noci.main}
 
    :repl {:dependencies [[midje "1.8.3"]]}
    :dev {:dependencies [[javax.servlet/servlet-api "2.5"]
